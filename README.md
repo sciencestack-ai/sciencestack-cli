@@ -25,21 +25,18 @@ Agent-first design:
 
 ## Install
 
-### Global (recommended)
 ```bash
-pipx install /Users/cj/Documents/science_ai/sciencestack-cli
+pip install sciencestack
 ```
 
-Then run from anywhere:
+Or with pipx (recommended for CLI tools):
+```bash
+pipx install sciencestack
+```
+
+Then run:
 ```bash
 sciencestack --help
-```
-
-### Local dev
-```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -e . --no-build-isolation
 ```
 
 ## Auth
