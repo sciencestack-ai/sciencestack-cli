@@ -12,6 +12,8 @@ Science is locked in PDFs. Equations, theorems, and figures have no stable addre
 
 This CLI exposes papers as structured objects with node-level IDs (`eq:1`, `thm:3`, `fig:2`, `sec:3.2`). Every equation, figure, theorem, and section is addressable and retrievable.
 
+**Alternative to ScienceStack MCP**: If you're using an agent framework that supports MCP, ScienceStack also provides an [MCP server](https://sciencestack.ai). This CLI is preferred for automation pipelines - deterministic exit codes, retry semantics, and more token-efficient (pipe through `jq` to filter fields before hitting context windows).
+
 This enables:
 - **Claim graphs**: Link assertions to specific evidence nodes across papers
 - **Precise retrieval**: Fetch `thm:4.3` instead of downloading 23 pages
