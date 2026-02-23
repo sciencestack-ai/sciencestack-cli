@@ -1017,7 +1017,11 @@ def config_init(ctx, force):
 @click.option("--to", "to_date", default=None, help="Published before (YYYY-MM-DD)")
 @click.pass_context
 def search(ctx, query, limit, cursor, field, sort, from_date, to_date):
-    """Search for papers by topic, author, or arXiv ID."""
+    """Search for papers by topic, author, or arXiv ID.
+
+    Tip: short, specific keywords work best (e.g. "attention mechanism" not
+    "papers about attention mechanisms in transformer models").
+    """
     client = _get_client(ctx)
     try:
         offset = _parse_cursor(cursor)

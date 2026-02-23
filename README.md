@@ -206,6 +206,10 @@ Machine output includes:
 - `meta.pagination.pageSize`
 - `meta.pagination.hasMore` (when available)
 
+## Search tips
+
+Short, specific keywords work best. Prefer `"attention mechanism"` over `"papers about attention mechanisms in transformer models"`. Use multiple short queries rather than one long one.
+
 ## Main commands
 
 - `search <query>`
