@@ -124,6 +124,14 @@ _COMMAND_SHAPES = {
         "required": ["path", "created"],
         "properties": {"path": {"type": "string"}, "created": {"type": "boolean"}},
     },
+    "doctor": {
+        "type": "object",
+        "required": ["status", "checks"],
+        "properties": {
+            "status": {"type": "string"},
+            "checks": {"type": "array"},
+        },
+    },
 }
 
 _COMMAND_CONTRACTS = {
@@ -201,6 +209,11 @@ _COMMAND_CONTRACTS = {
         "args": [],
         "options": [],
         "responseDataShape": _COMMAND_SHAPES["config.path"],
+    },
+    "doctor": {
+        "args": [],
+        "options": [],
+        "responseDataShape": _COMMAND_SHAPES["doctor"],
     },
     "config.init": {
         "args": [],
@@ -875,7 +888,7 @@ def main(
     ctx.obj["max_concurrency"] = resolved_max_concurrency
     ctx.obj["strict"] = resolved_strict
     ctx.obj["config_path"] = config_path
-    command_without_auth = {"capabilities", "schema", "config"}
+    command_without_auth = {"capabilities", "schema", "config", "doctor"}
     if ctx.invoked_subcommand in command_without_auth:
         return
 
@@ -1134,6 +1147,153 @@ def health(ctx, probe_paper_id):
         _emit_data(ctx, payload, command_name="health", human_text=f"up (probe={probe_paper_id})")
     except ScienceStackError as e:
         _exit_with_error(ctx, e)
+
+
+# ---------------------------------------------------------------------------
+# doctor
+# ---------------------------------------------------------------------------
+
+
+def _doctor_check_config() -> dict:
+    """Check config file existence, validity, and permissions."""
+    check = {"name": "config", "status": "pass"}
+    paths = _candidate_config_paths()
+    found_path = None
+    for p in paths:
+        if p.exists():
+            found_path = p
+            break
+
+    if found_path is None:
+        check["status"] = "warn"
+        check["message"] = "No config file found (optional but recommended)"
+        check["hint"] = "Run: sciencestack config init"
+        return check
+
+    check["path"] = str(found_path)
+
+    try:
+        raw = found_path.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        check["status"] = "fail"
+        check["message"] = f"Cannot read config: {exc}"
+        return check
+
+    if not isinstance(parsed, dict):
+        check["status"] = "fail"
+        check["message"] = "Config must be a JSON object"
+        return check
+
+    # Permission check
+    if os.name != "nt" and "api_key" in parsed:
+        mode = found_path.stat().st_mode & 0o777
+        if mode & 0o077:
+            check["status"] = "fail"
+            check["message"] = f"Insecure permissions: {oct(mode)} (expected 0o600)"
+            check["hint"] = f"Run: chmod 600 {found_path}"
+            return check
+
+    check["message"] = "Config loaded OK"
+    return check
+
+
+def _doctor_check_api_key(ctx: click.Context) -> dict:
+    """Check API key presence and source."""
+    check = {"name": "api_key", "status": "pass"}
+
+    flag_key = ctx.params.get("api_key")
+    env_key = os.environ.get("SCIENCESTACK_API_KEY")
+    file_config, _ = _read_cli_config()
+    config_key = file_config.get("api_key") if isinstance(file_config, dict) else None
+
+    if flag_key:
+        check["source"] = "flag"
+    elif env_key:
+        check["source"] = "env"
+    elif config_key:
+        check["source"] = "config"
+    else:
+        check["status"] = "fail"
+        check["message"] = "No API key found"
+        check["hint"] = "Set SCIENCESTACK_API_KEY or add api_key to config"
+        return check
+
+    check["message"] = f"API key found (source: {check['source']})"
+    return check
+
+
+def _doctor_check_connectivity(ctx: click.Context) -> dict:
+    """Probe upstream API health."""
+    check = {"name": "connectivity", "status": "pass"}
+
+    # Resolve key for probe
+    env_key = os.environ.get("SCIENCESTACK_API_KEY")
+    file_config, _ = _read_cli_config()
+    config_key = file_config.get("api_key") if isinstance(file_config, dict) else None
+    api_key = ctx.params.get("api_key") or env_key or config_key
+
+    if not api_key:
+        check["status"] = "skip"
+        check["message"] = "Skipped (no API key)"
+        return check
+
+    base_url = ctx.obj.get("base_url", "https://sciencestack.ai/api/v1")
+    timeout = ctx.obj.get("timeout", 30.0)
+    client = ScienceStackClient(api_key, base_url, timeout=timeout, retries=0, retry_backoff_ms=0)
+    try:
+        client.overview("1706.03762")
+        check["message"] = "API reachable, auth valid"
+    except ScienceStackError as e:
+        if e.status_code in {401, 403}:
+            check["status"] = "fail"
+            check["message"] = f"Auth failed: {e.message}"
+        elif e.status_code == 429:
+            check["status"] = "warn"
+            check["message"] = "Rate limited (API is reachable but throttled)"
+        elif e.code in {"TIMEOUT", "NETWORK"}:
+            check["status"] = "fail"
+            check["message"] = f"Cannot reach API: {e.message}"
+        elif e.status_code >= 500:
+            check["status"] = "warn"
+            check["message"] = f"API returned server error: {e.message}"
+        else:
+            check["status"] = "fail"
+            check["message"] = f"{e.code}: {e.message}"
+
+    return check
+
+
+@main.command()
+@click.pass_context
+def doctor(ctx):
+    """Run diagnostics on config, auth, and API connectivity."""
+    checks = [
+        _doctor_check_config(),
+        _doctor_check_api_key(ctx),
+        _doctor_check_connectivity(ctx),
+    ]
+
+    all_pass = all(c["status"] == "pass" for c in checks)
+    any_fail = any(c["status"] == "fail" for c in checks)
+    overall = "pass" if all_pass else ("fail" if any_fail else "warn")
+
+    payload = {"status": overall, "checks": checks}
+
+    # Human output
+    lines = []
+    icons = {"pass": "+", "warn": "!", "fail": "x", "skip": "-"}
+    for c in checks:
+        icon = icons.get(c["status"], "?")
+        line = f"[{icon}] {c['name']}: {c.get('message', c['status'])}"
+        hint = c.get("hint")
+        if hint:
+            line += f"\n    hint: {hint}"
+        lines.append(line)
+    lines.append(f"\nOverall: {overall}")
+    human_text = "\n".join(lines)
+
+    _emit_data(ctx, payload, command_name="doctor", human_text=human_text)
 
 
 # ---------------------------------------------------------------------------

@@ -219,6 +219,7 @@ Machine output includes:
 - `getartifact <slug>`
 - `batch-nodes --requests '<json>' --format raw`
 - `health`
+- `doctor`
 - `capabilities`
 - `schema [command_name]`
 - `config path`
