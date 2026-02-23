@@ -113,15 +113,11 @@ def _format_toc(d: dict) -> str:
 
 
 def _format_equation_list(d: dict) -> str:
-    """Equations are not in the overview — just indicate count and how to fetch."""
-    # Overview doesn't include equations directly, but might have an equations field
-    eqs = d.get("equations", [])
-    if eqs:
-        lines = [f"{d.get('title', '?')} ({d.get('arxivId', '?')}) — {len(eqs)} equations", ""]
-        for eq in eqs:
-            lines.append(f"{eq.get('nodeId', '?')}  (eq {eq.get('number', '?')})")
-        return "\n".join(lines)
-    return f"Use: sciencestack nodes {d.get('arxivId', '<id>')} --type equation --format latex"
+    """Equations aren't in the overview response. Direct user to nodes command."""
+    return (
+        f"Equations are not included in overview. To fetch equations:\n\n"
+        f"  sciencestack nodes {d.get('arxivId', '<id>')} --type equation --format latex"
+    )
 
 
 def _format_table_list(d: dict) -> str:

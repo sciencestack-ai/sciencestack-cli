@@ -1039,10 +1039,10 @@ def search(ctx, query, limit, cursor, field, sort, from_date, to_date):
 @main.command()
 @click.argument("paper_id")
 @click.option("--sections", is_flag=True, help="Show TOC only")
-@click.option("--equations", is_flag=True, help="Show equations only")
+@click.option("--equations", is_flag=True, help="Show equations (hint: use 'nodes --type equation' for full content)")
 @click.option("--tables", is_flag=True, help="Show tables only")
 @click.option("--figures", is_flag=True, help="Show figures only")
-@click.option("--theorems", is_flag=True, help="Show theorems/proofs only")
+@click.option("--theorems", is_flag=True, help="Show theorems/lemmas/proofs (mathEnvs) only")
 @click.option("--algorithms", is_flag=True, help="Show algorithms only")
 @click.pass_context
 def overview(ctx, paper_id, sections, equations, tables, figures, theorems, algorithms):
