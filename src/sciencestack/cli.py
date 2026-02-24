@@ -1038,7 +1038,7 @@ def search(ctx, query, limit, cursor, field, sort, from_date, to_date):
 
 @main.command()
 @click.argument("paper_id")
-@click.option("--sections", is_flag=True, help="Show TOC only")
+@click.option("--sections", is_flag=True, help="Show sections only")
 @click.option("--equations", is_flag=True, help="Show equations (hint: use 'nodes --type equation' for full content)")
 @click.option("--tables", is_flag=True, help="Show tables only")
 @click.option("--figures", is_flag=True, help="Show figures only")
@@ -1046,7 +1046,7 @@ def search(ctx, query, limit, cursor, field, sort, from_date, to_date):
 @click.option("--algorithms", is_flag=True, help="Show algorithms only")
 @click.pass_context
 def overview(ctx, paper_id, sections, equations, tables, figures, theorems, algorithms):
-    """Get paper overview (metadata, TOC, element lists).
+    """Get paper overview (metadata, sections, element lists).
 
     Supports comma-separated IDs for batch: sciencestack overview 1706.03762,2305.18290
     """

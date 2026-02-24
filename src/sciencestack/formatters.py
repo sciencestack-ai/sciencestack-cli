@@ -46,7 +46,7 @@ def format_overview(data: dict, filter_key: str | None = None) -> str:
     d = data.get("data", data)
 
     if filter_key == "sections":
-        return _format_toc(d)
+        return _format_sections(d)
     elif filter_key == "equations":
         return _format_equation_list(d)
     elif filter_key == "tables":
@@ -86,7 +86,7 @@ def _format_overview_compact(d: dict) -> str:
     # Counts
     counts = []
     for key, label in [
-        ("toc", "sections"),
+        ("sections", "sections"),
         ("figures", "figures"),
         ("tables", "tables"),
         ("mathEnvs", "theorems/proofs"),
@@ -101,12 +101,12 @@ def _format_overview_compact(d: dict) -> str:
     return "\n".join(lines)
 
 
-def _format_toc(d: dict) -> str:
-    toc = d.get("toc", [])
-    if not toc:
+def _format_sections(d: dict) -> str:
+    sections = d.get("sections", [])
+    if not sections:
         return "No sections found."
-    lines = [f"{d.get('title', '?')} ({d.get('arxivId', '?')}) — Table of Contents", ""]
-    for entry in toc:
+    lines = [f"{d.get('title', '?')} ({d.get('arxivId', '?')}) — Sections", ""]
+    for entry in sections:
         indent = "  " * (entry.get("depth", 1) - 1)
         lines.append(f"{indent}{entry.get('nodeId', '?')}  {entry.get('title', '?')}")
     return "\n".join(lines)
