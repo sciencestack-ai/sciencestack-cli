@@ -37,11 +37,11 @@ echo "Updated $PYPROJECT and $INIT_FILE"
 
 # Clean and build
 rm -rf dist/
-python -m build
+python3 -m build
 echo "Built dist/"
 
 # Upload to PyPI
-python -m twine upload dist/*
+python3 -m twine upload dist/*
 echo "Uploaded to PyPI"
 
 # Git commit, tag, push
