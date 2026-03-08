@@ -2,6 +2,7 @@
 
 import httpx
 import time
+from urllib.parse import quote
 
 
 class ScienceStackError(Exception):
@@ -113,7 +114,7 @@ class ScienceStackClient:
         )
 
     def overview(self, paper_id: str) -> dict:
-        return self._get(f"/papers/{paper_id}/overview")
+        return self._get(f"/papers/{quote(paper_id, safe='')}/overview")
 
     def batch_overview(self, paper_ids: list[str]) -> dict:
         return self._get("/papers/overview", ids=",".join(paper_ids))
@@ -128,7 +129,7 @@ class ScienceStackClient:
         limit: int = 100,
     ) -> dict:
         return self._get(
-            f"/papers/{paper_id}/nodes",
+            f"/papers/{quote(paper_id, safe='')}/nodes",
             types=types,
             nodeIds=node_ids,
             format=format,
@@ -137,7 +138,7 @@ class ScienceStackClient:
         )
 
     def content(self, paper_id: str, format: str = "markdown") -> dict:
-        return self._get(f"/papers/{paper_id}/content", format=format)
+        return self._get(f"/papers/{quote(paper_id, safe='')}/content", format=format)
 
     def references(
         self,
@@ -147,14 +148,14 @@ class ScienceStackClient:
         offset: int | None = None,
     ) -> dict:
         return self._get(
-            f"/papers/{paper_id}/references",
+            f"/papers/{quote(paper_id, safe='')}/references",
             citeKeys=cite_keys,
             limit=limit,
             offset=offset,
         )
 
     def citations(self, paper_id: str, limit: int = 100, offset: int | None = None) -> dict:
-        return self._get(f"/papers/{paper_id}/citations", limit=limit, offset=offset)
+        return self._get(f"/papers/{quote(paper_id, safe='')}/citations", limit=limit, offset=offset)
 
     def author_papers(
         self,
