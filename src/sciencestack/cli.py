@@ -47,7 +47,7 @@ _AGENT_OUTPUT_SCHEMA = {
 }
 
 _COMMAND_SHAPES = {
-    "search": {"type": "object", "required": ["data"], "properties": {"data": {"type": "array"}}},
+    "search": {"type": "object", "required": ["items"], "properties": {"items": {"type": "array"}}},
     "overview": {
         "oneOf": [
             {"type": "object"},
@@ -57,6 +57,7 @@ _COMMAND_SHAPES = {
     "nodes": {
         "oneOf": [
             {"type": "object", "required": ["data"], "properties": {"data": {}}},
+            {"type": "object", "required": ["items"]},
             {"type": "object", "required": ["count", "items"], "properties": {"count": {"type": "integer"}, "items": {"type": "array"}}},
         ]
     },
@@ -68,18 +69,18 @@ _COMMAND_SHAPES = {
     },
     "refs": {
         "oneOf": [
-            {"type": "object", "required": ["data"]},
+            {"type": "object", "required": ["items"]},
             {"type": "object", "required": ["count", "items"], "properties": {"count": {"type": "integer"}, "items": {"type": "array"}}},
         ]
     },
     "citations": {
         "oneOf": [
-            {"type": "object", "required": ["data"]},
+            {"type": "object", "required": ["items"]},
             {"type": "object", "required": ["count", "items"], "properties": {"count": {"type": "integer"}, "items": {"type": "array"}}},
         ]
     },
-    "authors": {"type": "object", "required": ["data"], "properties": {"data": {"type": "array"}}},
-    "getartifacts": {"type": "object", "required": ["data"]},
+    "authors": {"type": "object", "required": ["items"], "properties": {"items": {"type": "array"}}},
+    "getartifacts": {"type": "object", "required": ["items"]},
     "getartifact": {"type": "object"},
     "batch-nodes": {
         "type": "object",
@@ -341,7 +342,79 @@ def _normalize_machine_payload(data: object) -> tuple[object, dict]:
         flattened.update(inner)
         return flattened, meta
 
+    # Rename list payloads: {"data": [...]} → {"items": [...]}
+    if isinstance(inner, list):
+        outer_fields = {k: v for k, v in data.items() if k not in {"data", "_version"}}
+        renamed = dict(outer_fields)
+        renamed["items"] = inner
+        return renamed, meta
+
     return data, meta
+
+
+def _normalize_node_fields(data: object) -> object:
+    """Ensure node objects use nodeId consistently (API raw format uses id)."""
+    if isinstance(data, dict):
+        inner = data.get("data")
+        if isinstance(inner, list):
+            for node in inner:
+                if isinstance(node, dict) and "id" in node and "nodeId" not in node:
+                    node["nodeId"] = node.pop("id")
+    return data
+
+
+_MATH_ENV_ALIASES = {
+    "theorem": "Theorem",
+    "lemma": "Lemma",
+    "proof": "Proof",
+    "definition": "Definition",
+    "corollary": "Corollary",
+    "proposition": "Proposition",
+    "remark": "Remark",
+    "example": "Example",
+}
+
+
+def _filter_math_env_subtype(data: dict, subtype: str) -> dict:
+    """Filter raw node list to only include math_env nodes matching subtype."""
+    inner = data.get("data")
+    if isinstance(inner, list):
+        filtered = [
+            n for n in inner
+            if isinstance(n, dict) and (
+                n.get("name", "").lower() == subtype.lower()
+                or n.get("title", "").lower() == subtype.lower()
+            )
+        ]
+        data["data"] = filtered
+    return data
+
+
+def _flatten_ref_enrichment(data: object) -> object:
+    """Promote enrichment fields to top level for agent ergonomics."""
+    items = None
+    if isinstance(data, dict):
+        items = data.get("data")
+    if not isinstance(items, list):
+        return data
+    for ref in items:
+        if not isinstance(ref, dict):
+            continue
+        enrichment = ref.get("enrichment") or {}
+        s2 = enrichment.get("semanticScholar") or {}
+        if s2.get("title") and "title" not in ref:
+            ref["title"] = s2["title"]
+        authors = s2.get("authors")
+        if authors and "authors" not in ref:
+            ref["authors"] = [a.get("name", a) if isinstance(a, dict) else a for a in authors]
+        year = (s2.get("publicationDate") or "")[:4]
+        if year and "year" not in ref:
+            ref["year"] = year
+        ext_ids = enrichment.get("externalIds") or {}
+        arxiv = ext_ids.get("ArXiv") or ref.get("arxivId")
+        if arxiv and "arxivId" not in ref:
+            ref["arxivId"] = arxiv
+    return data
 
 
 def _normalize_response_object(raw_response: object) -> dict:
@@ -1079,7 +1152,7 @@ def _get_filter_key(*flags) -> str | None:
 
 @main.command()
 @click.argument("paper_id")
-@click.option("--type", "-t", "node_type", default=None, help="Node type: equation, table, figure, section, math_env, algorithm, code")
+@click.option("--type", "-t", "node_type", default=None, help="Node type: equation, table, figure, section, math_env, algorithm, code, theorem, lemma, proof, definition, corollary, proposition")
 @click.option("--ids", "-i", default=None, help="Specific node IDs (comma-separated): eq:1,thm:2,sec:3.2")
 @click.option("--format", "-f", "fmt", default="markdown", type=click.Choice(["markdown", "latex", "raw"]), help="Output format")
 @click.option("--context", "-c", "ctx_size", default=None, type=int, help="Include N surrounding nodes")
@@ -1089,18 +1162,24 @@ def nodes(ctx, paper_id, node_type, ids, fmt, ctx_size, limit):
     """Fetch specific paper nodes (equations, sections, figures, etc.)."""
     client = _get_client(ctx)
     try:
+        resolved_type = node_type
+        math_env_filter = None
+        if node_type and node_type.lower() in _MATH_ENV_ALIASES:
+            resolved_type = "math_env"
+            math_env_filter = _MATH_ENV_ALIASES[node_type.lower()]
+
+        def _fetch_nodes(pid):
+            data = client.nodes(pid, types=resolved_type, node_ids=ids, format=fmt, context=ctx_size, limit=limit)
+            data = _normalize_node_fields(data)
+            if math_env_filter:
+                data = _filter_math_env_subtype(data, math_env_filter)
+            return data
+
         _execute_paper_command(
             ctx,
             command_name="nodes",
             paper_id_arg=paper_id,
-            fetch_one=lambda pid: client.nodes(
-                pid,
-                types=node_type,
-                node_ids=ids,
-                format=fmt,
-                context=ctx_size,
-                limit=limit,
-            ),
+            fetch_one=_fetch_nodes,
             human_formatter=lambda data: format_nodes(data, fmt),
         )
     except ScienceStackError as e:
@@ -1424,7 +1503,7 @@ def refs(ctx, paper_id, cite_keys, limit, cursor):
             ctx,
             command_name="refs",
             paper_id_arg=paper_id,
-            fetch_one=lambda pid: client.references(pid, cite_keys=cite_keys, limit=limit, offset=offset),
+            fetch_one=lambda pid: _flatten_ref_enrichment(client.references(pid, cite_keys=cite_keys, limit=limit, offset=offset)),
             human_formatter=format_references,
             single_meta_builder=lambda data: _build_pagination_meta(data, cursor_offset=offset, page_size=limit),
         )

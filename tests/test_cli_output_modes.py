@@ -115,7 +115,7 @@ class CliOutputModeTests(unittest.TestCase):
 
     def test_search_defaults_to_json(self):
         with patch.object(cli_mod, "ScienceStackClient", FakeClient):
-            result = self.runner.invoke(cli_mod.main, ["search", "transformers"], env={"SCIENCESTACK_API_KEY": "k"})
+            result = self.runner.invoke(cli_mod.main, ["search", "transformers"], env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"})
 
         self.assertEqual(result.exit_code, 0)
         payload = _parse_first_json_blob(result.output)
@@ -123,14 +123,14 @@ class CliOutputModeTests(unittest.TestCase):
         self.assertEqual(payload["service"], "sciencestack")
         self.assertEqual(payload["protocolVersion"], "1")
         self.assertEqual(payload["command"], "search")
-        self.assertEqual(payload["data"]["data"][0]["arxivId"], "1234.5678")
+        self.assertEqual(payload["data"]["items"][0]["arxivId"], "1234.5678")
 
     def test_search_human_output(self):
         with patch.object(cli_mod, "ScienceStackClient", FakeClient):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["--output", "human", "search", "transformers"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -142,7 +142,7 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["--output", "ndjson", "overview", "1111.1111,2222.2222"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -174,7 +174,7 @@ class CliOutputModeTests(unittest.TestCase):
 
     def test_api_error_maps_to_deterministic_exit_code(self):
         with patch.object(cli_mod, "ScienceStackClient", ErrorClient):
-            result = self.runner.invoke(cli_mod.main, ["search", "transformers"], env={"SCIENCESTACK_API_KEY": "k"})
+            result = self.runner.invoke(cli_mod.main, ["search", "transformers"], env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"})
 
         self.assertEqual(result.exit_code, 11)
         payload = _parse_first_json_blob(result.output)
@@ -182,7 +182,7 @@ class CliOutputModeTests(unittest.TestCase):
         self.assertTrue(payload["error"]["retryable"])
 
     def test_capabilities_works_without_api_key(self):
-        result = self.runner.invoke(cli_mod.main, ["capabilities"], env={"SCIENCESTACK_API_KEY": ""})
+        result = self.runner.invoke(cli_mod.main, ["capabilities"], env={"SCIENCESTACK_API_KEY": "", "SCIENCESTACK_CONFIG": "/nonexistent"})
 
         self.assertEqual(result.exit_code, 0)
         payload = _parse_first_json_blob(result.output)
@@ -192,7 +192,7 @@ class CliOutputModeTests(unittest.TestCase):
         self.assertIn("overview", payload["data"]["multiPaperCommands"])
 
     def test_schema_for_single_command(self):
-        result = self.runner.invoke(cli_mod.main, ["schema", "overview"], env={"SCIENCESTACK_API_KEY": ""})
+        result = self.runner.invoke(cli_mod.main, ["schema", "overview"], env={"SCIENCESTACK_API_KEY": "", "SCIENCESTACK_CONFIG": "/nonexistent"})
 
         self.assertEqual(result.exit_code, 0)
         payload = _parse_first_json_blob(result.output)
@@ -201,7 +201,7 @@ class CliOutputModeTests(unittest.TestCase):
 
     def test_health_success(self):
         with patch.object(cli_mod, "ScienceStackClient", FakeClient):
-            result = self.runner.invoke(cli_mod.main, ["health"], env={"SCIENCESTACK_API_KEY": "k"})
+            result = self.runner.invoke(cli_mod.main, ["health"], env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"})
 
         self.assertEqual(result.exit_code, 0)
         payload = _parse_first_json_blob(result.output)
@@ -209,7 +209,7 @@ class CliOutputModeTests(unittest.TestCase):
         self.assertEqual(payload["data"]["probe"]["command"], "overview")
 
     def test_schema_unknown_command_is_validation_error(self):
-        result = self.runner.invoke(cli_mod.main, ["schema", "not_a_cmd"], env={"SCIENCESTACK_API_KEY": ""})
+        result = self.runner.invoke(cli_mod.main, ["schema", "not_a_cmd"], env={"SCIENCESTACK_API_KEY": "", "SCIENCESTACK_CONFIG": "/nonexistent"})
 
         self.assertEqual(result.exit_code, 2)
         payload = _parse_first_json_blob(result.output)
@@ -220,7 +220,7 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["--protocol-version", "1", "search", "transformers"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -232,7 +232,7 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["nodes", "1111.1111,2222.2222"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -246,7 +246,7 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["--output", "ndjson", "content", "1111.1111,2222.2222"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -262,7 +262,7 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["search", "transformers", "--limit", "2", "--cursor", "4"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -275,7 +275,7 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["--strict", "search", "transformers"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 17)
@@ -293,7 +293,7 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["batch-nodes", "--requests", reqs, "--format", "raw"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -362,7 +362,7 @@ class CliOutputModeTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "CONFIG")
 
     def test_config_path_without_api_key(self):
-        result = self.runner.invoke(cli_mod.main, ["config", "path"], env={"SCIENCESTACK_API_KEY": ""})
+        result = self.runner.invoke(cli_mod.main, ["config", "path"], env={"SCIENCESTACK_API_KEY": "", "SCIENCESTACK_CONFIG": "/nonexistent"})
 
         self.assertEqual(result.exit_code, 0)
         payload = _parse_first_json_blob(result.output)
@@ -389,20 +389,20 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["getartifacts", "--field", "rl", "--limit", "1", "--cursor", "0"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
         payload = _parse_first_json_blob(result.output)
         self.assertEqual(payload["command"], "getartifacts")
-        self.assertEqual(payload["data"]["data"][0]["slug"], "weekly-rl-2026-w05")
+        self.assertEqual(payload["data"]["items"][0]["slug"], "weekly-rl-2026-w05")
 
     def test_getartifact_command(self):
         with patch.object(cli_mod, "ScienceStackClient", FakeClient):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["getartifact", "weekly-rl-2026-w05"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -415,7 +415,7 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["overview", "1111.1111"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -429,13 +429,97 @@ class CliOutputModeTests(unittest.TestCase):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["--timeout", "12.5", "--retries", "3", "--retry-backoff-ms", "400", "search", "transformers"],
-                env={"SCIENCESTACK_API_KEY": "k"},
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
             )
 
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(RecordingClient.last_timeout, 12.5)
         self.assertEqual(RecordingClient.last_retries, 3)
         self.assertEqual(RecordingClient.last_retry_backoff_ms, 400)
+
+
+class RawNodesClient(FakeClient):
+    def nodes(self, paper_id: str, **kwargs):
+        return {"data": [
+            {"id": "eq:1", "type": "equation", "content": "E=mc^2"},
+            {"id": "thm:1", "type": "math_env", "name": "Theorem", "content": "..."},
+            {"id": "lem:1", "type": "math_env", "name": "Lemma", "content": "..."},
+        ]}
+
+
+class EnrichedRefsClient(FakeClient):
+    def references(self, paper_id: str, **kwargs):
+        return {"data": [
+            {
+                "citeKey": "vaswani2017",
+                "enrichment": {
+                    "semanticScholar": {
+                        "title": "Attention Is All You Need",
+                        "authors": [{"name": "Ashish Vaswani"}, {"name": "Noam Shazeer"}],
+                        "publicationDate": "2017-06-12",
+                    },
+                    "externalIds": {"ArXiv": "1706.03762"},
+                },
+            }
+        ]}
+
+
+class ErgonomicsTests(unittest.TestCase):
+    def setUp(self):
+        self.runner = CliRunner()
+
+    def test_nodes_raw_normalizes_id_to_nodeId(self):
+        with patch.object(cli_mod, "ScienceStackClient", RawNodesClient):
+            result = self.runner.invoke(
+                cli_mod.main,
+                ["nodes", "1111.1111", "--format", "raw"],
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        payload = _parse_first_json_blob(result.output)
+        items = payload["data"]["items"]
+        self.assertEqual(items[0]["nodeId"], "eq:1")
+        self.assertNotIn("id", items[0])
+
+    def test_nodes_type_theorem_filters_to_theorems(self):
+        with patch.object(cli_mod, "ScienceStackClient", RawNodesClient):
+            result = self.runner.invoke(
+                cli_mod.main,
+                ["nodes", "1111.1111", "--type", "theorem", "--format", "raw"],
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        payload = _parse_first_json_blob(result.output)
+        items = payload["data"]["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["name"], "Theorem")
+
+    def test_refs_enrichment_flattened(self):
+        with patch.object(cli_mod, "ScienceStackClient", EnrichedRefsClient):
+            result = self.runner.invoke(
+                cli_mod.main,
+                ["refs", "1111.1111"],
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        payload = _parse_first_json_blob(result.output)
+        ref = payload["data"]["items"][0]
+        self.assertEqual(ref["title"], "Attention Is All You Need")
+        self.assertEqual(ref["authors"], ["Ashish Vaswani", "Noam Shazeer"])
+        self.assertEqual(ref["year"], "2017")
+        self.assertEqual(ref["arxivId"], "1706.03762")
+        # Original enrichment preserved
+        self.assertIn("enrichment", ref)
+
+    def test_protocol_version_is_2(self):
+        result = self.runner.invoke(cli_mod.main, ["capabilities"], env={"SCIENCESTACK_API_KEY": "", "SCIENCESTACK_CONFIG": "/nonexistent"})
+
+        self.assertEqual(result.exit_code, 0)
+        payload = _parse_first_json_blob(result.output)
+        self.assertEqual(payload["data"]["protocolVersion"], "1")
 
 
 if __name__ == "__main__":
