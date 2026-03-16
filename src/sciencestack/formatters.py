@@ -41,6 +41,37 @@ def format_parse(data: dict, status_code: int) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Upload / Jobs
+# ---------------------------------------------------------------------------
+
+def format_upload(data: dict, status_code: int) -> str:
+    d = data.get("data", data)
+    filename = d.get("filename", "?")
+    job_id = d.get("jobId", "?")
+    paper_id = d.get("paperId", "?")
+    est = d.get("estimatedTimeMinutes", "?")
+    return f"Uploaded: {filename}  (paperId: {paper_id})\n  Job: {job_id}  (~{est} min)\n  Poll: sciencestack job {job_id}"
+
+
+def format_job_status(data: dict) -> str:
+    d = data.get("data", data)
+    job_id = d.get("jobId", "?")
+    status = d.get("status", "unknown")
+    progress = d.get("progressPercent")
+    message = d.get("message")
+    paper_id = d.get("paperId")
+
+    parts = [f"Job {job_id}: {status}"]
+    if progress is not None:
+        parts[0] += f" ({progress}%)"
+    if message:
+        parts.append(f"  {message}")
+    if paper_id and status == "done":
+        parts.append(f"  Paper: {paper_id}")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
 

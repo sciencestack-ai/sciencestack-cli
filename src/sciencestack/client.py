@@ -220,5 +220,59 @@ class ScienceStackClient:
     def artifact(self, slug: str) -> dict:
         return self._get(f"/artifacts/{slug}")
 
+    def _post_file(self, path: str, file_path: str) -> tuple[dict, int]:
+        """Upload a file via multipart/form-data. Returns (parsed JSON, status code)."""
+        import pathlib
+
+        fp = pathlib.Path(file_path)
+        if not fp.exists():
+            raise ScienceStackError("VALIDATION", f"File not found: {file_path}", 0)
+
+        for attempt in range(self.retries + 1):
+            try:
+                with open(fp, "rb") as f:
+                    resp = self._client.post(
+                        path,
+                        files={"file": (fp.name, f, "application/octet-stream")},
+                    )
+            except httpx.TimeoutException as exc:
+                if attempt < self.retries:
+                    self._sleep_backoff(attempt)
+                    continue
+                raise ScienceStackError("TIMEOUT", "Request timed out", 0) from exc
+            except httpx.RequestError as exc:
+                if attempt < self.retries:
+                    self._sleep_backoff(attempt)
+                    continue
+                raise ScienceStackError("NETWORK", str(exc), 0) from exc
+
+            if resp.status_code in self._RETRY_STATUS_CODES and attempt < self.retries:
+                self._sleep_backoff(attempt, resp.headers.get("retry-after"))
+                continue
+            break
+
+        if not resp.content:
+            raise ScienceStackError("EMPTY_RESPONSE", f"Empty response (HTTP {resp.status_code})", resp.status_code)
+        try:
+            data = resp.json()
+        except Exception:
+            raise ScienceStackError("INVALID_RESPONSE", resp.text[:200], resp.status_code)
+        if resp.status_code >= 400:
+            err = data.get("error", {})
+            raise ScienceStackError(
+                code=err.get("code", "UNKNOWN"),
+                message=err.get("message", resp.text),
+                status_code=resp.status_code,
+            )
+        return data, resp.status_code
+
+    def upload(self, file_path: str) -> tuple[dict, int]:
+        """Upload a TeX file for parsing. Returns (data, http_status)."""
+        return self._post_file("/me/papers/upload", file_path)
+
+    def job_status(self, job_id: str) -> dict:
+        """Poll job status. Returns parsed JSON."""
+        return self._get(f"/jobs/{job_id}")
+
     def close(self):
         self._client.close()

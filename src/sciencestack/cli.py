@@ -13,12 +13,14 @@ import click
 from .client import ScienceStackClient, ScienceStackError
 from .formatters import (
     format_citations,
+    format_job_status,
     format_json,
     format_nodes,
     format_overview,
     format_parse,
     format_references,
     format_search,
+    format_upload,
 )
 
 _SERVICE_NAME = "sciencestack"
@@ -1174,6 +1176,81 @@ def parse(ctx, arxiv_id):
         data, status_code = client.parse(arxiv_id)
         human_text = format_parse(data, status_code)
         _emit_data(ctx, data, command_name="parse", human_text=human_text)
+    except ScienceStackError as e:
+        _exit_with_error(ctx, e)
+
+
+# ---------------------------------------------------------------------------
+# upload
+# ---------------------------------------------------------------------------
+
+@main.command()
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--poll", is_flag=True, help="Poll until processing completes")
+@click.option("--poll-interval", default=5, type=int, help="Seconds between polls (default: 5)")
+@click.pass_context
+def upload(ctx, file, poll, poll_interval):
+    """Upload a TeX file for parsing.
+
+    Accepts .tex, .zip, .tar.gz, .tgz, .gz, .flt files (no PDFs).
+
+    Returns a job ID for polling status. Use --poll to wait for completion.
+
+    \b
+    Examples:
+      sciencestack upload paper.tex
+      sciencestack upload paper.zip --poll
+      sciencestack upload archive.tar.gz --poll --poll-interval 10
+    """
+    import time as _time
+
+    client = _get_client(ctx)
+    try:
+        data, status_code = client.upload(file)
+        human_text = format_upload(data, status_code)
+        _emit_data(ctx, data, command_name="upload", human_text=human_text)
+
+        if poll:
+            job_id = data.get("data", data).get("jobId")
+            if not job_id:
+                return
+            while True:
+                _time.sleep(poll_interval)
+                job_data = client.job_status(job_id)
+                status = job_data.get("data", job_data).get("status")
+                human_text = format_job_status(job_data)
+
+                mode = _resolve_output_mode(ctx)
+                if mode == "human":
+                    click.echo(human_text)
+                else:
+                    _emit_data(ctx, job_data, command_name="job", human_text=human_text)
+
+                if status in ("done", "failed"):
+                    break
+    except ScienceStackError as e:
+        _exit_with_error(ctx, e)
+
+
+# ---------------------------------------------------------------------------
+# job
+# ---------------------------------------------------------------------------
+
+@main.command()
+@click.argument("job_id")
+@click.pass_context
+def job(ctx, job_id):
+    """Check the status of a processing job.
+
+    \b
+    Examples:
+      sciencestack job 660e8400-e29b-41d4-a716-446655440000
+    """
+    client = _get_client(ctx)
+    try:
+        data = client.job_status(job_id)
+        human_text = format_job_status(data)
+        _emit_data(ctx, data, command_name="job", human_text=human_text)
     except ScienceStackError as e:
         _exit_with_error(ctx, e)
 
