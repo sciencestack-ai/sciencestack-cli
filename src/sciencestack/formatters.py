@@ -17,6 +17,30 @@ def format_json(data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Parse
+# ---------------------------------------------------------------------------
+
+def format_parse(data: dict, status_code: int) -> str:
+    d = data.get("data", data)
+    status = d.get("status", "unknown")
+    arxiv_id = d.get("arxivId", "?")
+
+    if status == "completed":
+        title = d.get("title", "?")
+        authors = ", ".join(d.get("authors", [])[:3])
+        if len(d.get("authors", [])) > 3:
+            authors += " et al."
+        return f"Already parsed: {arxiv_id}  {title}\n  {authors}"
+
+    if status == "processing":
+        est = d.get("estimatedTimeMinutes", "?")
+        poll = d.get("pollUrl", "")
+        return f"Submitted: {arxiv_id}  (~{est} min)\n  Poll: {poll}"
+
+    return f"{status}: {arxiv_id}"
+
+
+# ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
 

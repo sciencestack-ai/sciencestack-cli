@@ -91,6 +91,46 @@ class ScienceStackClient:
             )
         return data
 
+    def _post(self, path: str, body: dict) -> tuple[dict, int]:
+        """Make a POST request, return (parsed JSON, status code)."""
+        for attempt in range(self.retries + 1):
+            try:
+                resp = self._client.post(path, json=body)
+            except httpx.TimeoutException as exc:
+                if attempt < self.retries:
+                    self._sleep_backoff(attempt)
+                    continue
+                raise ScienceStackError("TIMEOUT", "Request timed out", 0) from exc
+            except httpx.RequestError as exc:
+                if attempt < self.retries:
+                    self._sleep_backoff(attempt)
+                    continue
+                raise ScienceStackError("NETWORK", str(exc), 0) from exc
+
+            if resp.status_code in self._RETRY_STATUS_CODES and attempt < self.retries:
+                self._sleep_backoff(attempt, resp.headers.get("retry-after"))
+                continue
+            break
+
+        if not resp.content:
+            raise ScienceStackError("EMPTY_RESPONSE", f"Empty response (HTTP {resp.status_code})", resp.status_code)
+        try:
+            data = resp.json()
+        except Exception:
+            raise ScienceStackError("INVALID_RESPONSE", resp.text[:200], resp.status_code)
+        if resp.status_code >= 400:
+            err = data.get("error", {})
+            raise ScienceStackError(
+                code=err.get("code", "UNKNOWN"),
+                message=err.get("message", resp.text),
+                status_code=resp.status_code,
+            )
+        return data, resp.status_code
+
+    def parse(self, arxiv_id: str) -> tuple[dict, int]:
+        """Request parsing of an arXiv paper. Returns (data, http_status)."""
+        return self._post("/papers/parse", {"arxivId": arxiv_id})
+
     def search(
         self,
         query: str,

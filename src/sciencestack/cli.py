@@ -16,6 +16,7 @@ from .formatters import (
     format_json,
     format_nodes,
     format_overview,
+    format_parse,
     format_references,
     format_search,
 )
@@ -87,6 +88,14 @@ _COMMAND_SHAPES = {
         "type": "object",
         "required": ["count", "items"],
         "properties": {"count": {"type": "integer"}, "items": {"type": "array"}},
+    },
+    "parse": {
+        "type": "object",
+        "required": ["status", "arxivId"],
+        "properties": {
+            "status": {"type": "string"},
+            "arxivId": {"type": "string"},
+        },
     },
     "health": {
         "type": "object",
@@ -186,6 +195,11 @@ _COMMAND_CONTRACTS = {
         "args": ["slug"],
         "options": [],
         "responseDataShape": _COMMAND_SHAPES["getartifact"],
+    },
+    "parse": {
+        "args": ["arxiv_id"],
+        "options": [],
+        "responseDataShape": _COMMAND_SHAPES["parse"],
     },
     "batch-nodes": {
         "args": [],
@@ -1137,6 +1151,29 @@ def search(ctx, query, limit, cursor, field, sort, from_date, to_date):
         data = client.search(query, limit=limit, offset=offset, field=field, sort=sort, from_date=from_date, to_date=to_date)
         meta = _build_pagination_meta(data, cursor_offset=offset, page_size=limit)
         _emit_data(ctx, data, command_name="search", human_text=format_search(data), meta=meta)
+    except ScienceStackError as e:
+        _exit_with_error(ctx, e)
+
+
+# ---------------------------------------------------------------------------
+# parse
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.argument("arxiv_id")
+@click.pass_context
+def parse(ctx, arxiv_id):
+    """Request parsing of an arXiv paper.
+
+    Returns immediately if the paper is already parsed (200).
+    Otherwise submits for parsing and returns polling info (202).
+    """
+    client = _get_client(ctx)
+    try:
+        data, status_code = client.parse(arxiv_id)
+        human_text = format_parse(data, status_code)
+        _emit_data(ctx, data, command_name="parse", human_text=human_text)
     except ScienceStackError as e:
         _exit_with_error(ctx, e)
 
