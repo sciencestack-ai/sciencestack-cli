@@ -144,12 +144,14 @@ class ScienceStackClient:
         self,
         paper_id: str,
         cite_keys: str | None = None,
+        format: str | None = None,
         limit: int = 100,
         offset: int | None = None,
     ) -> dict:
         return self._get(
             f"/papers/{quote(paper_id, safe='')}/references",
             citeKeys=cite_keys,
+            format=format,
             limit=limit,
             offset=offset,
         )

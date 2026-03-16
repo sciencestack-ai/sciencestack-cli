@@ -21,7 +21,7 @@ from .formatters import (
 )
 
 _SERVICE_NAME = "sciencestack"
-_PROTOCOL_VERSION = "1"
+_PROTOCOL_VERSION = "2"
 
 _AGENT_OUTPUT_SCHEMA = {
     "type": "object",
@@ -56,7 +56,7 @@ _COMMAND_SHAPES = {
     },
     "nodes": {
         "oneOf": [
-            {"type": "object", "required": ["data"], "properties": {"data": {}}},
+            {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}},
             {"type": "object", "required": ["items"]},
             {"type": "object", "required": ["count", "items"], "properties": {"count": {"type": "integer"}, "items": {"type": "array"}}},
         ]
@@ -64,6 +64,7 @@ _COMMAND_SHAPES = {
     "content": {
         "oneOf": [
             {"type": "object"},
+            {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}},
             {"type": "object", "required": ["count", "items"], "properties": {"count": {"type": "integer"}, "items": {"type": "array"}}},
         ]
     },
@@ -324,7 +325,7 @@ def _resolve_output_mode(ctx: click.Context) -> str:
     return ctx.obj.get("output", "json")
 
 
-def _normalize_machine_payload(data: object) -> tuple[object, dict]:
+def _normalize_machine_payload(data: object, *, protocol_version: str = "2") -> tuple[object, dict]:
     """Flatten API payloads where useful for agent ergonomics."""
     if not isinstance(data, dict):
         return data, {}
@@ -335,19 +336,31 @@ def _normalize_machine_payload(data: object) -> tuple[object, dict]:
     version = data.get("_version")
     meta = {"version": version} if version else {}
 
+    is_v2 = protocol_version != "1"
+    exclude = {"data", "_version"}
+    if is_v2:
+        exclude.add("pagination")
+
     # Flatten object payloads: {"arxivId":..., "data": {"title":...}} -> {"arxivId":..., "title":...}
     if isinstance(inner, dict):
-        outer_fields = {k: v for k, v in data.items() if k not in {"data", "_version"}}
+        outer_fields = {k: v for k, v in data.items() if k not in exclude}
         flattened = dict(outer_fields)
         flattened.update(inner)
         return flattened, meta
 
     # Rename list payloads: {"data": [...]} → {"items": [...]}
     if isinstance(inner, list):
-        outer_fields = {k: v for k, v in data.items() if k not in {"data", "_version"}}
+        outer_fields = {k: v for k, v in data.items() if k not in exclude}
         renamed = dict(outer_fields)
         renamed["items"] = inner
         return renamed, meta
+
+    # String payloads: {"data": "markdown..."} → {"text": "markdown..."} (v2)
+    if isinstance(inner, str) and is_v2:
+        outer_fields = {k: v for k, v in data.items() if k not in exclude}
+        result = dict(outer_fields)
+        result["text"] = inner
+        return result, meta
 
     return data, meta
 
@@ -381,17 +394,16 @@ def _filter_math_env_subtype(data: dict, subtype: str) -> dict:
     if isinstance(inner, list):
         filtered = [
             n for n in inner
-            if isinstance(n, dict) and (
-                n.get("name", "").lower() == subtype.lower()
-                or n.get("title", "").lower() == subtype.lower()
-            )
+            if isinstance(n, dict) and
+            isinstance(n.get("name"), str) and
+            n["name"].lower() == subtype.lower()
         ]
         data["data"] = filtered
     return data
 
 
-def _flatten_ref_enrichment(data: object) -> object:
-    """Promote enrichment fields to top level for agent ergonomics."""
+def _flatten_ref_fields(data: object) -> object:
+    """Promote ref fields for agent ergonomics. Reads metadata.fields first, then enrichment.semanticScholar."""
     items = None
     if isinstance(data, dict):
         items = data.get("data")
@@ -400,25 +412,42 @@ def _flatten_ref_enrichment(data: object) -> object:
     for ref in items:
         if not isinstance(ref, dict):
             continue
+        # Read from metadata.fields (format=raw) — always present
+        metadata = ref.get("metadata") or {}
+        fields = metadata.get("fields") or {}
+        if fields.get("title") and "title" not in ref:
+            ref["title"] = fields["title"]
+        if fields.get("author") and "authors" not in ref:
+            author_val = fields["author"]
+            ref["authors"] = [a.strip() for a in author_val.split(" and ")] if isinstance(author_val, str) else author_val
+        if fields.get("year") and "year" not in ref:
+            ref["year"] = fields["year"]
+        # Override with enrichment.semanticScholar if available (richer data)
         enrichment = ref.get("enrichment") or {}
         s2 = enrichment.get("semanticScholar") or {}
-        if s2.get("title") and "title" not in ref:
+        if s2.get("title"):
             ref["title"] = s2["title"]
         authors = s2.get("authors")
-        if authors and "authors" not in ref:
+        if authors:
             ref["authors"] = [a.get("name", a) if isinstance(a, dict) else a for a in authors]
         year = (s2.get("publicationDate") or "")[:4]
-        if year and "year" not in ref:
+        if year:
             ref["year"] = year
         ext_ids = enrichment.get("externalIds") or {}
         arxiv = ext_ids.get("ArXiv") or ref.get("arxivId")
         if arxiv and "arxivId" not in ref:
             ref["arxivId"] = arxiv
+        # Strip noise
+        for key in ("content", "metadata", "orderIndex"):
+            ref.pop(key, None)
+        # Drop empty enrichment
+        if "enrichment" in ref and not ref["enrichment"]:
+            del ref["enrichment"]
     return data
 
 
-def _normalize_response_object(raw_response: object) -> dict:
-    normalized, response_meta = _normalize_machine_payload(raw_response)
+def _normalize_response_object(raw_response: object, *, protocol_version: str = "2") -> dict:
+    normalized, response_meta = _normalize_machine_payload(raw_response, protocol_version=protocol_version)
     response_obj = {"response": normalized}
     if response_meta:
         response_obj["responseMeta"] = response_meta
@@ -426,11 +455,12 @@ def _normalize_response_object(raw_response: object) -> dict:
 
 
 def _success_envelope(ctx: click.Context, command_name: str, data: dict, meta: dict | None = None) -> dict:
-    normalized_data, normalized_meta = _normalize_machine_payload(data)
+    pv = ctx.obj.get("protocol_version", _PROTOCOL_VERSION)
+    normalized_data, normalized_meta = _normalize_machine_payload(data, protocol_version=pv)
     payload = {
         "ok": True,
         "service": _SERVICE_NAME,
-        "protocolVersion": ctx.obj.get("protocol_version", _PROTOCOL_VERSION),
+        "protocolVersion": pv,
         "command": command_name,
         "data": normalized_data,
     }
@@ -591,11 +621,12 @@ def _run_multi_paper_command(
 ) -> None:
     responses = _parallel_ordered_map(ctx, paper_ids, fetch_fn)
     is_human = _resolve_output_mode(ctx) == "human"
+    pv = ctx.obj.get("protocol_version", _PROTOCOL_VERSION)
     items = []
     human_sections = []
     for pid, data in zip(paper_ids, responses):
         item = {"paperId": pid}
-        item.update(_normalize_response_object(data))
+        item.update(_normalize_response_object(data, protocol_version=pv))
         items.append(item)
         if is_human and human_formatter is not None:
             human_sections.append(human_formatter(data))
@@ -647,11 +678,12 @@ def _execute_paper_command(
         else:
             responses = fetch_many(paper_ids)
             is_human = _resolve_output_mode(ctx) == "human"
+            pv = ctx.obj.get("protocol_version", _PROTOCOL_VERSION)
             items = []
             human_sections = []
             for pid, data in zip(paper_ids, responses):
                 item = {"paperId": pid}
-                item.update(_normalize_response_object(data))
+                item.update(_normalize_response_object(data, protocol_version=pv))
                 items.append(item)
                 if is_human and human_formatter is not None:
                     human_sections.append(human_formatter(data))
@@ -695,7 +727,11 @@ def _emit_data(
             if isinstance(data_items, list):
                 items = data_items
             else:
-                items = [data]
+                data_items = data.get("items")
+                if isinstance(data_items, list):
+                    items = data_items
+                else:
+                    items = [data]
         for idx, item in enumerate(items):
             row_meta = {"streamIndex": idx}
             if meta:
@@ -830,7 +866,7 @@ def _schemas_payload(command_name: str | None = None) -> dict:
 @click.option(
     "--protocol-version",
     default=None,
-    type=click.Choice([_PROTOCOL_VERSION]),
+    type=click.Choice(["1", "2"]),
     help="Agent protocol version contract.",
 )
 @click.option("--timeout", default=None, type=float, help="HTTP request timeout in seconds.")
@@ -909,7 +945,7 @@ def main(
         )
         if resolved_output not in {"json", "human", "ndjson"}:
             raise ScienceStackError("CONFIG", f"Invalid output in config/env: {resolved_output}", 0)
-        if resolved_protocol_version != _PROTOCOL_VERSION:
+        if resolved_protocol_version not in {"1", "2"}:
             raise ScienceStackError("CONFIG", f"Unsupported protocol version: {resolved_protocol_version}", 0)
         if resolved_timeout <= 0 or resolved_timeout > 300:
             raise ScienceStackError("CONFIG", "timeout must be > 0 and <= 300 seconds", 0)
@@ -1455,6 +1491,8 @@ def batch_nodes(ctx, requests, requests_file, fmt):
         reqs = _load_batch_requests(requests, requests_file)
         normalized = [_normalize_batch_node_request(req, idx) for idx, req in enumerate(reqs)]
 
+        pv = ctx.obj.get("protocol_version", _PROTOCOL_VERSION)
+
         def _fetch_one(item):
             data = client.nodes(
                 item["paperId"],
@@ -1469,7 +1507,7 @@ def batch_nodes(ctx, requests, requests_file, fmt):
                 "paperId": item["paperId"],
                 "request": item["request"],
             }
-            row.update(_normalize_response_object(data))
+            row.update(_normalize_response_object(data, protocol_version=pv))
             return row
 
         items = _parallel_ordered_map(ctx, normalized, _fetch_one)
@@ -1499,11 +1537,20 @@ def refs(ctx, paper_id, cite_keys, limit, cursor):
     client = _get_client(ctx)
     try:
         offset = _parse_cursor(cursor)
+        mode = _resolve_output_mode(ctx)
+        ref_format = "raw" if mode in ("json", "ndjson") else None
+
+        def _fetch_refs(pid):
+            data = client.references(pid, cite_keys=cite_keys, format=ref_format, limit=limit, offset=offset)
+            if mode != "human":
+                data = _flatten_ref_fields(data)
+            return data
+
         _execute_paper_command(
             ctx,
             command_name="refs",
             paper_id_arg=paper_id,
-            fetch_one=lambda pid: _flatten_ref_enrichment(client.references(pid, cite_keys=cite_keys, limit=limit, offset=offset)),
+            fetch_one=_fetch_refs,
             human_formatter=format_references,
             single_meta_builder=lambda data: _build_pagination_meta(data, cursor_offset=offset, page_size=limit),
         )

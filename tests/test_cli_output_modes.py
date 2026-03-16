@@ -121,7 +121,7 @@ class CliOutputModeTests(unittest.TestCase):
         payload = _parse_first_json_blob(result.output)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["service"], "sciencestack")
-        self.assertEqual(payload["protocolVersion"], "1")
+        self.assertEqual(payload["protocolVersion"], "2")
         self.assertEqual(payload["command"], "search")
         self.assertEqual(payload["data"]["items"][0]["arxivId"], "1234.5678")
 
@@ -170,7 +170,7 @@ class CliOutputModeTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "CONFIG")
         self.assertFalse(payload["error"]["retryable"])
         self.assertEqual(payload["service"], "sciencestack")
-        self.assertEqual(payload["protocolVersion"], "1")
+        self.assertEqual(payload["protocolVersion"], "2")
 
     def test_api_error_maps_to_deterministic_exit_code(self):
         with patch.object(cli_mod, "ScienceStackClient", ErrorClient):
@@ -442,16 +442,25 @@ class RawNodesClient(FakeClient):
     def nodes(self, paper_id: str, **kwargs):
         return {"data": [
             {"id": "eq:1", "type": "equation", "content": "E=mc^2"},
-            {"id": "thm:1", "type": "math_env", "name": "Theorem", "content": "..."},
-            {"id": "lem:1", "type": "math_env", "name": "Lemma", "content": "..."},
+            {"id": "thm:1", "type": "math_env", "name": "Theorem", "title": [{"type": "text", "content": "Main Result"}], "content": "..."},
+            {"id": "lem:1", "type": "math_env", "name": "Lemma", "title": [{"type": "text", "content": "Helper"}], "content": "..."},
         ]}
 
 
-class EnrichedRefsClient(FakeClient):
+class StructuredRefsClient(FakeClient):
     def references(self, paper_id: str, **kwargs):
         return {"data": [
             {
                 "citeKey": "vaswani2017",
+                "content": [{"type": "text", "content": "bibtex tokens"}],
+                "orderIndex": 42,
+                "metadata": {
+                    "fields": {
+                        "title": "Attention Is All You Need",
+                        "author": "Ashish Vaswani and Noam Shazeer",
+                        "year": "2017",
+                    }
+                },
                 "enrichment": {
                     "semanticScholar": {
                         "title": "Attention Is All You Need",
@@ -496,8 +505,8 @@ class ErgonomicsTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["name"], "Theorem")
 
-    def test_refs_enrichment_flattened(self):
-        with patch.object(cli_mod, "ScienceStackClient", EnrichedRefsClient):
+    def test_refs_structured_fields_promoted_noise_stripped(self):
+        with patch.object(cli_mod, "ScienceStackClient", StructuredRefsClient):
             result = self.runner.invoke(
                 cli_mod.main,
                 ["refs", "1111.1111"],
@@ -511,7 +520,11 @@ class ErgonomicsTests(unittest.TestCase):
         self.assertEqual(ref["authors"], ["Ashish Vaswani", "Noam Shazeer"])
         self.assertEqual(ref["year"], "2017")
         self.assertEqual(ref["arxivId"], "1706.03762")
-        # Original enrichment preserved
+        # Noise stripped
+        self.assertNotIn("content", ref)
+        self.assertNotIn("metadata", ref)
+        self.assertNotIn("orderIndex", ref)
+        # Enrichment preserved (non-empty)
         self.assertIn("enrichment", ref)
 
     def test_protocol_version_is_2(self):
@@ -519,7 +532,49 @@ class ErgonomicsTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0)
         payload = _parse_first_json_blob(result.output)
-        self.assertEqual(payload["data"]["protocolVersion"], "1")
+        self.assertEqual(payload["data"]["protocolVersion"], "2")
+
+    def test_string_payload_becomes_text_key(self):
+        with patch.object(cli_mod, "ScienceStackClient", FakeClient):
+            result = self.runner.invoke(
+                cli_mod.main,
+                ["nodes", "1111.1111"],
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        payload = _parse_first_json_blob(result.output)
+        self.assertIn("text", payload["data"])
+        self.assertNotIn("data", payload["data"])
+        self.assertEqual(payload["data"]["text"], "nodes-for-1111.1111")
+
+    def test_pagination_only_in_meta_not_data(self):
+        with patch.object(cli_mod, "ScienceStackClient", CursorClient):
+            result = self.runner.invoke(
+                cli_mod.main,
+                ["search", "transformers", "--limit", "2"],
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        payload = _parse_first_json_blob(result.output)
+        self.assertNotIn("pagination", payload["data"])
+        self.assertIn("pagination", payload["meta"])
+
+    def test_v1_preserves_old_behavior(self):
+        with patch.object(cli_mod, "ScienceStackClient", FakeClient):
+            result = self.runner.invoke(
+                cli_mod.main,
+                ["--protocol-version", "1", "nodes", "1111.1111"],
+                env={"SCIENCESTACK_API_KEY": "k", "SCIENCESTACK_CONFIG": "/nonexistent"},
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        payload = _parse_first_json_blob(result.output)
+        self.assertEqual(payload["protocolVersion"], "1")
+        # v1: string stays under "data" key (stutter preserved)
+        self.assertIn("data", payload["data"])
+        self.assertNotIn("text", payload["data"])
 
 
 if __name__ == "__main__":
